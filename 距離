@@ -1,0 +1,301 @@
+--==============================
+--【可拖動 + 可縮小 FastAttack UI】(多人版｜縮小＝🤡)
+--==============================
+
+_G.FastAttackState = _G.FastAttackState or {}
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Player = Players.LocalPlayer
+local UserId = Player.UserId
+
+-- ⭐ 每位玩家獨立狀態
+local function GetState()
+    return _G.FastAttackState[UserId] == true
+end
+
+local function SetState(v)
+    _G.FastAttackState[UserId] = v and true or false
+end
+
+SetState(false)
+
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+--==============================
+--【UI】
+--==============================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FastAttackUI_" .. UserId
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+-- 主框
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 160, 0, 50)
+Main.Position = UDim2.new(0.8, 0, 0.25, 0)
+Main.BackgroundColor3 = Color3.fromRGB(35,35,35)
+Main.Parent = ScreenGui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0,12)
+
+-- 縮小 / 展開按鈕
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 26, 0, 26)
+MinBtn.Position = UDim2.new(1, -18, 0, -8)
+MinBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
+MinBtn.Text = "-" -- 展開狀態
+MinBtn.TextScaled = true
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextColor3 = Color3.new(1,1,1)
+MinBtn.Parent = Main
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(1,0)
+
+-- FastAttack 主要開關
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.new(1,-10,1,-10)
+Toggle.Position = UDim2.new(0,5,0,5)
+Toggle.BackgroundColor3 = Color3.fromRGB(170,0,0)
+Toggle.Text = "FastAttack : OFF"
+Toggle.TextColor3 = Color3.new(1,1,1)
+Toggle.TextScaled = true
+Toggle.Font = Enum.Font.GothamBold
+Toggle.Parent = Main
+Instance.new("UICorner", Toggle).CornerRadius = UDim.new(0,10)
+
+--==============================
+--【拖動】
+--==============================
+
+local dragging = false
+local dragStart, startPos
+
+Main.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
+    end
+end)
+
+Main.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+--==============================
+--【UI 更新 / 縮小】
+--==============================
+
+local Collapsed = false
+local savedSize = Main.Size
+
+local function RefreshUI()
+    if GetState() then
+        Toggle.Text = "FastAttack : ON"
+        Toggle.BackgroundColor3 = Color3.fromRGB(0,170,0)
+    else
+        Toggle.Text = "FastAttack : OFF"
+        Toggle.BackgroundColor3 = Color3.fromRGB(170,0,0)
+    end
+end
+
+Toggle.MouseButton1Click:Connect(function()
+    SetState(not GetState())
+    RefreshUI()
+end)
+
+-- ⭐ 縮小＝🤡　展開＝-
+local function ApplyCollapseState()
+    if Collapsed then
+        savedSize = Main.Size
+        Main.Size = UDim2.new(0, 42, 0, 42)
+
+        Toggle.Visible = false
+        MinBtn.Text = "🤡"
+    else
+        Main.Size = savedSize
+
+        Toggle.Visible = true
+        MinBtn.Text = "-"
+    end
+end
+
+MinBtn.MouseButton1Click:Connect(function()
+    Collapsed = not Collapsed
+    ApplyCollapseState()
+end)
+
+RefreshUI()
+ApplyCollapseState()
+
+--==============================
+--【FastAttack 設定】
+--==============================
+
+local Settings = {
+    AutoClick = true,
+    Distance = 5000,
+
+    EnemyRate = 0.5,
+    PlayerRate = 0.05,
+
+    AttackEnemies = true,
+    AttackPlayers = true
+}
+
+--==============================
+--【模組 / 物件】
+--==============================
+
+local Net = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
+local RegisterAttack = Net:WaitForChild("RE/RegisterAttack")
+local RegisterHit = Net:WaitForChild("RE/RegisterHit")
+
+local EnemiesFolder = workspace:WaitForChild("Enemies")
+local CharactersFolder = workspace:WaitForChild("Characters")
+
+local TargetCache = {
+    Enemies = {},
+    Players = {}
+}
+
+local function IsAlive(char)
+    local hum = char:FindFirstChild("Humanoid")
+    return hum and hum.Health > 0
+end
+
+--==============================
+--【掃描敵人】
+--==============================
+
+task.spawn(function()
+    while true do
+        if GetState() and Settings.AutoClick and Settings.AttackEnemies then
+            local temp = {}
+            local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+
+            if root then
+                for _, obj in pairs(EnemiesFolder:GetChildren()) do
+                    local head = obj:FindFirstChild("Head")
+                    if head and IsAlive(obj) then
+                        if (head.Position - root.Position).Magnitude <= Settings.Distance then
+                            table.insert(temp, {obj, head})
+                        end
+                    end
+                end
+            end
+
+            TargetCache.Enemies = temp
+        else
+            TargetCache.Enemies = {}
+        end
+
+        task.wait(Settings.EnemyRate)
+    end
+end)
+
+--==============================
+--【掃描玩家】
+--==============================
+
+task.spawn(function()
+    while true do
+        if GetState() and Settings.AutoClick and Settings.AttackPlayers then
+            local temp = {}
+            local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+
+            if root then
+                for _, obj in pairs(CharactersFolder:GetChildren()) do
+                    if obj ~= Player.Character then
+                        local head = obj:FindFirstChild("Head")
+                        if head and IsAlive(obj) then
+                            if (head.Position - root.Position).Magnitude <= Settings.Distance then
+                                table.insert(temp, {obj, head})
+                            end
+                        end
+                    end
+                end
+            end
+
+            TargetCache.Players = temp
+        else
+            TargetCache.Players = {}
+        end
+
+        task.wait(Settings.PlayerRate)
+    end
+end)
+
+--==============================
+--【攻擊主循環】
+--==============================
+
+task.spawn(function()
+    while true do
+        if GetState() and Settings.AutoClick then
+
+            local char = Player.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local tool = char and char:FindFirstChildOfClass("Tool")
+
+            -- 必須有角色 & 工具 & 非槍
+            if char and root and tool and (tool.ToolTip ~= "Gun") then
+
+                local allTargets = {}
+                local basePart = nil
+
+                local function addTargets(list)
+                    for _, t in pairs(list) do
+                        local guy = t[1]
+
+                        local hrp =
+                            guy:FindFirstChild("HumanoidRootPart")
+                            or guy:FindFirstChild("UpperTorso")
+                            or t[2]
+
+                        local hum = guy:FindFirstChild("Humanoid")
+
+                        if hum and hum.Health > 0 and hrp then
+                            if (hrp.Position - root.Position).Magnitude <= Settings.Distance then
+                                table.insert(allTargets, {guy, hrp})
+                                if not basePart then basePart = hrp end
+                            end
+                        end
+                    end
+                end
+
+                addTargets(TargetCache.Enemies)
+                addTargets(TargetCache.Players)
+
+                if basePart and #allTargets > 0 then
+                    RegisterAttack:FireServer(tool)
+                    task.wait(0.02)
+                    RegisterHit:FireServer(basePart, allTargets)
+                end
+            end
+        end
+
+        task.wait(0.08)
+    end
+end)
+
+print("多人版 FastAttack（刀 & 拳法穩定命中｜UI 可縮小 🤡）已載入")
